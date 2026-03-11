@@ -1,0 +1,69 @@
+-- 1. Мастерские
+CREATE TABLE мастерские (
+    код_мастерской SERIAL PRIMARY KEY,
+    наименование VARCHAR(100) NOT NULL,
+    адрес VARCHAR(200) NOT NULL,
+    телефон VARCHAR(20),
+    UNIQUE(наименование)
+);
+
+-- 2. Бригады
+CREATE TABLE бригады (
+    код_бригады SERIAL PRIMARY KEY,
+    наименование VARCHAR(100) NOT NULL UNIQUE,
+    код_мастерской INT NOT NULL REFERENCES мастерские(код_мастерской) ON DELETE CASCADE
+);
+
+-- 3. Персонал
+CREATE TABLE персонал (
+    код_мастерской INT NOT NULL REFERENCES мастерские(код_мастерской) ON DELETE CASCADE,
+    инн_человека VARCHAR(12) NOT NULL UNIQUE,
+    код_бригады INT REFERENCES бригады(код_бригады) ON DELETE SET NULL,
+    фио VARCHAR(150) NOT NULL, -- ФИО одной строкой
+    должность VARCHAR(50) DEFAULT 'механик',
+    PRIMARY KEY (код_мастерской, инн_человека)
+);
+
+-- 4. Автомобили
+CREATE TABLE автомобили (
+    код_автомобиля SERIAL PRIMARY KEY,
+    госномер VARCHAR(20) NOT NULL UNIQUE,
+    владелец VARCHAR(150) NOT NULL,
+    марка VARCHAR(50),
+    vin VARCHAR(17) UNIQUE
+);
+
+-- 5. Неисправности
+CREATE TABLE неисправности (
+    код_неисправности SERIAL PRIMARY KEY,
+    наименование VARCHAR(100) NOT NULL UNIQUE,
+    стоимость_работы DECIMAL(10,2) NOT NULL CHECK (стоимость_работы >= 0)
+);
+
+-- 6. Ремонт
+CREATE TABLE ремонт_автомобиля (
+    код_ремонта SERIAL PRIMARY KEY,
+    код_автомобиля INT NOT NULL REFERENCES автомобили(код_автомобиля) ON DELETE CASCADE,
+    код_неисправности INT NOT NULL REFERENCES неисправности(код_неисправности),
+    код_бригады INT REFERENCES бригады(код_бригады) ON DELETE SET NULL,
+    дата_поступления DATE NOT NULL DEFAULT CURRENT_DATE,
+    дата_окончания DATE,
+    статус VARCHAR(20) DEFAULT 'в работе' CHECK (статус IN ('в работе', 'готов', 'выдан')),
+    CHECK (дата_окончания IS NULL OR дата_окончания >= дата_поступления)
+);
+
+-- 7. Запчасти
+CREATE TABLE запчасти (
+    код_запчасти SERIAL PRIMARY KEY,
+    код_ремонта INT NOT NULL REFERENCES ремонт_автомобиля(код_ремонта) ON DELETE CASCADE,
+    наименование VARCHAR(100) NOT NULL,
+    цена DECIMAL(10,2) NOT NULL CHECK (цена > 0),
+    количество INT NOT NULL CHECK (количество > 0),
+    код_неисправности INT REFERENCES неисправности(код_неисправности)
+);
+
+-- Индексы
+CREATE INDEX idx_персонал_бригада ON персонал(код_бригады);
+CREATE INDEX idx_ремонт_авто_даты ON ремонт_автомобиля(дата_поступления);
+CREATE INDEX idx_ремонт_авто_статус ON ремонт_автомобиля(статус);
+CREATE INDEX idx_запчасти_ремонт ON запчасти(код_ремонта);
