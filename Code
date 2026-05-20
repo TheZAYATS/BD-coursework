@@ -1,0 +1,630 @@
+import java.sql.*;
+import java.text.SimpleDateFormat;
+import java.util.*;
+
+public class AutoRepairApp {
+    static Scanner scanner = new Scanner(System.in);
+    static SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");
+
+    public static void main(String[] args) {
+        System.out.println("========================================");
+        System.out.println("  АВТОМАСТЕРСКАЯ - СИСТЕМА УПРАВЛЕНИЯ  ");
+        System.out.println("========================================");
+
+        while (true) {
+            System.out.println("\nГЛАВНОЕ МЕНЮ:");
+            System.out.println("1. Работа с таблицами");
+            System.out.println("2. Отчёты");
+            System.out.println("3. Просмотр представлений (VIEW)");
+            System.out.println("0. Выход");
+            System.out.print("Выберите действие: ");
+
+            int choice = scanner.nextInt();
+            scanner.nextLine();
+
+            switch (choice) {
+                case 1 -> tableMenu();
+                case 2 -> reportMenu();
+                case 3 -> viewMenu();
+                case 0 -> {
+                    System.out.println("До свидания!");
+                    return;
+                }
+                default -> System.out.println("Неверный выбор!");
+            }
+        }
+    }
+
+    static void tableMenu() {
+        System.out.println("\n--- РАБОТА С ТАБЛИЦАМИ ---");
+        System.out.println("1. Мастерские");
+        System.out.println("2. Бригады");
+        System.out.println("3. Персонал");
+        System.out.println("4. Автомобили");
+        System.out.println("5. Неисправности");
+        System.out.println("6. Ремонты");
+        System.out.println("7. Запчасти");
+        System.out.println("8. Новый ремонт + запчасти");
+        System.out.print("Выберите таблицу: ");
+
+        int choice = scanner.nextInt();
+        scanner.nextLine();
+
+        switch (choice) {
+            case 1 -> workWithTable("workshops", "workshop_id", "int",
+                    new String[]{"name", "address", "phone"},
+                    new String[]{"varchar", "varchar", "varchar"});
+            case 2 -> workWithTable("brigades", "brigade_id", "int",
+                    new String[]{"name", "specialization"},
+                    new String[]{"varchar", "varchar"});
+            case 3 -> workWithTable("staff", "inn", "varchar",
+                    new String[]{"inn", "workshop_id", "brigade_id", "full_name", "position", "hire_date"},
+                    new String[]{"varchar", "int", "int", "varchar", "varchar", "date"});
+            case 4 -> workWithTable("cars", "car_id", "int",
+                    new String[]{"vin", "body_number", "engine_number", "owner_name", "model"},
+                    new String[]{"varchar", "varchar", "varchar", "varchar", "varchar"});
+            case 5 -> workWithTable("malfunctions", "malfunction_id", "int",
+                    new String[]{"name", "work_cost", "description"},
+                    new String[]{"varchar", "numeric", "varchar"});
+            case 6 -> workWithTable("repairs", "repair_id", "int",
+                    new String[]{"car_id", "malfunction_id", "brigade_id", "start_date", "end_date", "status"},
+                    new String[]{"int", "int", "int", "date", "date", "varchar"});
+            case 7 -> workWithTable("repair_parts", "part_id", "int",
+                    new String[]{"repair_id", "name", "quantity", "price"},
+                    new String[]{"int", "varchar", "int", "numeric"});
+            case 8 -> createRepairWithParts();
+            default -> System.out.println("Неверный выбор!");
+        }
+    }
+
+    static void workWithTable(String tableName, String pkColumn, String pkType, String[] columns, String[] columnTypes) {
+        while (true) {
+            System.out.println("\n--- Таблица: " + tableName.toUpperCase() + " ---");
+            System.out.println("1. Показать все записи");
+            System.out.println("2. Добавить запись");
+            System.out.println("3. Изменить запись");
+            System.out.println("4. Удалить запись");
+            System.out.println("5. Поиск по полю");
+            System.out.println("6. Сортировка");
+            System.out.println("0. Назад");
+            System.out.print("Выберите: ");
+
+            int choice = scanner.nextInt();
+            scanner.nextLine();
+
+            try {
+                switch (choice) {
+                    case 1 -> showAllRecords(tableName);
+                    case 2 -> addRecord(tableName, columns, columnTypes);
+                    case 3 -> updateRecord(tableName, pkColumn, pkType, columns, columnTypes);
+                    case 4 -> deleteRecord(tableName, pkColumn, pkType);
+                    case 5 -> searchRecord(tableName, columns);
+                    case 6 -> sortRecords(tableName, columns);
+                    case 0 -> { return; }
+                    default -> System.out.println("Неверный выбор!");
+                }
+            } catch (SQLException e) {
+                System.out.println("Ошибка: " + e.getMessage());
+                if (e.getMessage().contains("foreign key")) {
+                    System.out.println("Совет: Проверьте, что связанные записи существуют.");
+                }
+            }
+        }
+    }
+
+    static void showAllRecords(String tableName) throws SQLException {
+        String sql = "SELECT * FROM " + tableName;
+        try (Connection conn = DatabaseConnection.getConnection();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+
+            ResultSetMetaData meta = rs.getMetaData();
+            int colCount = meta.getColumnCount();
+
+            for (int i = 1; i <= colCount; i++) {
+                System.out.printf("%-25s", meta.getColumnName(i));
+            }
+            System.out.println();
+            System.out.println("=".repeat(colCount * 25));
+
+            boolean hasData = false;
+            while (rs.next()) {
+                hasData = true;
+                for (int i = 1; i <= colCount; i++) {
+                    String value = rs.getString(i);
+                    if (value == null) value = "NULL";
+                    System.out.printf("%-25s", value.length() > 24 ? value.substring(0, 22) + "..." : value);
+                }
+                System.out.println();
+            }
+
+            if (!hasData) {
+                System.out.println("(Нет данных)");
+            }
+        }
+    }
+
+    static void addRecord(String tableName, String[] columns, String[] columnTypes) throws SQLException {
+        System.out.println("\n--- ДОБАВЛЕНИЕ ЗАПИСИ В " + tableName.toUpperCase() + " ---");
+
+        StringBuilder sql = new StringBuilder("INSERT INTO " + tableName + " (");
+        sql.append(String.join(", ", columns));
+        sql.append(") VALUES (");
+        sql.append("?, ".repeat(columns.length));
+        sql.setLength(sql.length() - 2);
+        sql.append(")");
+
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+
+            for (int i = 0; i < columns.length; i++) {
+                System.out.print(columns[i] + ": ");
+                String value = scanner.nextLine();
+
+                if (value == null || value.trim().isEmpty()) {
+                    ps.setNull(i + 1, Types.NULL);
+                } else {
+                    String type = columnTypes[i];
+                    switch (type) {
+                        case "int":
+                            ps.setInt(i + 1, Integer.parseInt(value));
+                            break;
+                        case "numeric":
+                            ps.setBigDecimal(i + 1, new java.math.BigDecimal(value));
+                            break;
+                        case "date":
+                            ps.setDate(i + 1, java.sql.Date.valueOf(value));
+                            break;
+                        default:
+                            ps.setString(i + 1, value);
+                            break;
+                    }
+                }
+            }
+
+            int rows = ps.executeUpdate();
+            if (rows > 0) {
+                System.out.println("✓ Запись успешно добавлена!");
+            } else {
+                System.out.println("✗ Ошибка при добавлении!");
+            }
+        } catch (NumberFormatException e) {
+            System.out.println("Ошибка: Неверный формат числа!");
+            throw new SQLException("Ошибка преобразования типа");
+        } catch (IllegalArgumentException e) {
+            System.out.println("Ошибка: Неверный формат даты! Используйте ГГГГ-ММ-ДД");
+            throw new SQLException("Ошибка преобразования даты");
+        }
+    }
+
+    static void updateRecord(String tableName, String pkColumn, String pkType, String[] columns, String[] columnTypes) throws SQLException {
+        System.out.print("\nВведите " + pkColumn + " записи для изменения: ");
+        String id = scanner.nextLine();
+
+        System.out.println("Введите новые значения (Enter - оставить без изменений):");
+
+        StringBuilder sql = new StringBuilder("UPDATE " + tableName + " SET ");
+        List<String> updateCols = new ArrayList<>();
+        List<Object> values = new ArrayList<>();
+        List<String> types = new ArrayList<>();
+
+        for (int i = 0; i < columns.length; i++) {
+            System.out.print(columns[i] + ": ");
+            String value = scanner.nextLine();
+            if (!value.isEmpty()) {
+                updateCols.add(columns[i] + " = ?");
+                values.add(value);
+                types.add(columnTypes[i]);
+            }
+        }
+
+        if (updateCols.isEmpty()) {
+            System.out.println("Нет изменений для сохранения!");
+            return;
+        }
+
+        sql.append(String.join(", ", updateCols));
+        sql.append(" WHERE ").append(pkColumn).append(" = ");
+
+        if (pkType.equals("int")) {
+            sql.append("?::integer");
+        } else {
+            sql.append("?");
+        }
+
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+
+            int paramIndex = 1;
+            for (int i = 0; i < values.size(); i++) {
+                String value = (String) values.get(i);
+                String type = types.get(i);
+
+                switch (type) {
+                    case "int":
+                        ps.setInt(paramIndex++, Integer.parseInt(value));
+                        break;
+                    case "numeric":
+                        ps.setBigDecimal(paramIndex++, new java.math.BigDecimal(value));
+                        break;
+                    case "date":
+                        ps.setDate(paramIndex++, java.sql.Date.valueOf(value));
+                        break;
+                    default:
+                        ps.setString(paramIndex++, value);
+                        break;
+                }
+            }
+
+            if (pkType.equals("int")) {
+                ps.setInt(paramIndex, Integer.parseInt(id));
+            } else {
+                ps.setString(paramIndex, id);
+            }
+
+            int rows = ps.executeUpdate();
+            if (rows > 0) {
+                System.out.println("✓ Запись успешно обновлена!");
+            } else {
+                System.out.println("✗ Запись с " + pkColumn + "=" + id + " не найдена!");
+            }
+        } catch (NumberFormatException e) {
+            System.out.println("Ошибка: Неверный формат числа!");
+        } catch (IllegalArgumentException e) {
+            System.out.println("Ошибка: Неверный формат даты! Используйте ГГГГ-ММ-ДД");
+        }
+    }
+
+    static void deleteRecord(String tableName, String pkColumn, String pkType) throws SQLException {
+        System.out.print("\nВведите " + pkColumn + " записи для удаления: ");
+        String id = scanner.nextLine();
+
+        String sql = "DELETE FROM " + tableName + " WHERE " + pkColumn + " = ";
+
+        if (pkType.equals("int")) {
+            sql += "?::integer";
+        } else {
+            sql += "?";
+        }
+
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            if (pkType.equals("int")) {
+                ps.setInt(1, Integer.parseInt(id));
+            } else {
+                ps.setString(1, id);
+            }
+
+            int rows = ps.executeUpdate();
+
+            if (rows > 0) {
+                System.out.println("✓ Запись успешно удалена!");
+            } else {
+                System.out.println("✗ Запись с " + pkColumn + "=" + id + " не найдена!");
+            }
+        } catch (NumberFormatException e) {
+            System.out.println("Ошибка: ID должен быть числом!");
+        }
+    }
+
+    static void searchRecord(String tableName, String[] columns) throws SQLException {
+        System.out.println("\nПо какому полю искать?");
+        for (int i = 0; i < columns.length; i++) {
+            System.out.println((i+1) + ". " + columns[i]);
+        }
+        System.out.print("Выберите (1-" + columns.length + "): ");
+        int colIndex = scanner.nextInt() - 1;
+        scanner.nextLine();
+
+        if (colIndex < 0 || colIndex >= columns.length) {
+            System.out.println("Неверный выбор!");
+            return;
+        }
+
+        System.out.print("Введите значение для поиска: ");
+        String value = scanner.nextLine();
+
+        String sql = "SELECT * FROM " + tableName + " WHERE CAST(" + columns[colIndex] + " AS TEXT) ILIKE ?";
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, "%" + value + "%");
+            ResultSet rs = ps.executeQuery();
+
+            ResultSetMetaData meta = rs.getMetaData();
+            int colCount = meta.getColumnCount();
+
+            boolean found = false;
+            while (rs.next()) {
+                found = true;
+                for (int i = 1; i <= colCount; i++) {
+                    System.out.printf("%-25s", rs.getString(i));
+                }
+                System.out.println();
+            }
+
+            if (!found) {
+                System.out.println("Ничего не найдено.");
+            }
+        }
+    }
+
+    static void sortRecords(String tableName, String[] columns) throws SQLException {
+        System.out.println("\nПо какому полю сортировать?");
+        for (int i = 0; i < columns.length; i++) {
+            System.out.println((i+1) + ". " + columns[i]);
+        }
+        System.out.print("Выберите (1-" + columns.length + "): ");
+        int colIndex = scanner.nextInt() - 1;
+        scanner.nextLine();
+
+        if (colIndex < 0 || colIndex >= columns.length) {
+            System.out.println("Неверный выбор!");
+            return;
+        }
+
+        System.out.print("1. По возрастанию / 2. По убыванию: ");
+        int orderChoice = scanner.nextInt();
+        scanner.nextLine();
+        String order = (orderChoice == 1) ? "ASC" : "DESC";
+
+        String sql = "SELECT * FROM " + tableName + " ORDER BY " + columns[colIndex] + " " + order;
+        try (Connection conn = DatabaseConnection.getConnection();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+
+            ResultSetMetaData meta = rs.getMetaData();
+            int colCount = meta.getColumnCount();
+
+            while (rs.next()) {
+                for (int i = 1; i <= colCount; i++) {
+                    System.out.printf("%-25s", rs.getString(i));
+                }
+                System.out.println();
+            }
+        }
+    }
+
+    static void createRepairWithParts() {
+        System.out.println("\n--- НОВЫЙ РЕМОНТ ---");
+
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            conn.setAutoCommit(false);
+
+            System.out.println("\nДоступные автомобили:");
+            showAllRecords("cars");
+            System.out.print("Введите car_id: ");
+            int carId = scanner.nextInt();
+            scanner.nextLine();
+
+            System.out.println("\nДоступные неисправности:");
+            showAllRecords("malfunctions");
+            System.out.print("Введите malfunction_id: ");
+            int malfunctionId = scanner.nextInt();
+            scanner.nextLine();
+
+            System.out.println("\nДоступные бригады:");
+            showAllRecords("brigades");
+            System.out.print("Введите brigade_id (0 - не назначать): ");
+            int brigadeId = scanner.nextInt();
+            scanner.nextLine();
+
+            String sqlRepair = "INSERT INTO repairs (car_id, malfunction_id, brigade_id, start_date, status) VALUES (?, ?, ?, CURRENT_DATE, 'В работе') RETURNING repair_id";
+            PreparedStatement psRepair = conn.prepareStatement(sqlRepair);
+            psRepair.setInt(1, carId);
+            psRepair.setInt(2, malfunctionId);
+            if (brigadeId == 0) {
+                psRepair.setNull(3, Types.INTEGER);
+            } else {
+                psRepair.setInt(3, brigadeId);
+            }
+
+            ResultSet rs = psRepair.executeQuery();
+            rs.next();
+            int repairId = rs.getInt(1);
+            System.out.println("✓ Ремонт создан, ID = " + repairId);
+
+            System.out.println("\n--- Добавление запчастей ---");
+            String sqlPart = "INSERT INTO repair_parts (repair_id, name, quantity, price) VALUES (?, ?, ?, ?)";
+            PreparedStatement psPart = conn.prepareStatement(sqlPart);
+
+            int partsCount = 0;
+            while (true) {
+                System.out.print("\nНазвание запчасти (Enter - завершить): ");
+                String name = scanner.nextLine();
+                if (name.isEmpty()) break;
+
+                System.out.print("Количество: ");
+                int qty = scanner.nextInt();
+                System.out.print("Цена за единицу: ");
+                double price = scanner.nextDouble();
+                scanner.nextLine();
+
+                psPart.setInt(1, repairId);
+                psPart.setString(2, name);
+                psPart.setInt(3, qty);
+                psPart.setDouble(4, price);
+                psPart.executeUpdate();
+                partsCount++;
+                System.out.println("  ✓ Запчасть \"" + name + "\" добавлена");
+            }
+
+            conn.commit();
+            System.out.println("\n✓✓✓ РЕМОНТ УСПЕШНО СОЗДАН!");
+            System.out.println("  ID ремонта: " + repairId);
+            System.out.println("  Добавлено запчастей: " + partsCount);
+            System.out.println("  Общая стоимость пересчитана триггером");
+
+        } catch (SQLException e) {
+            System.out.println("Ошибка: " + e.getMessage());
+            System.out.println("Операция отменена.");
+        }
+    }
+
+    static void reportMenu() {
+        System.out.println("\n--- ОТЧЁТЫ ---");
+        System.out.println("1. Стоимость ремонта (фильтр по дате)");
+        System.out.println("2. Производительность труда бригад");
+        System.out.print("Выберите отчёт: ");
+
+        int choice = scanner.nextInt();
+        scanner.nextLine();
+
+        try {
+            switch (choice) {
+                case 1 -> reportRepairCost();
+                case 2 -> reportBrigadePerformance();
+                default -> System.out.println("Неверный выбор!");
+            }
+        } catch (SQLException e) {
+            System.out.println("Ошибка: " + e.getMessage());
+        }
+    }
+
+    static void reportRepairCost() throws SQLException {
+        System.out.println("\n--- ОТЧЁТ: СТОИМОСТЬ РЕМОНТА ---");
+        System.out.print("Фильтр по дате начала (ГГГГ-ММ-ДД, Enter - все): ");
+        String dateFilter = scanner.nextLine();
+
+        System.out.println("Сортировка:");
+        System.out.println("1. По дате");
+        System.out.println("2. По стоимости");
+        System.out.print("Выберите: ");
+        int sortChoice = scanner.nextInt();
+        scanner.nextLine();
+        String orderBy = (sortChoice == 1) ? "r.start_date" : "r.total_cost";
+
+        String sql = "SELECT " +
+                "r.repair_id, " +
+                "c.owner_name, " +
+                "c.model, " +
+                "m.name AS malfunction, " +
+                "r.start_date, " +
+                "r.total_cost, " +
+                "COALESCE((SELECT SUM(quantity) FROM repair_parts WHERE repair_id = r.repair_id), 0) AS parts_count " +
+                "FROM repairs r " +
+                "JOIN cars c ON r.car_id = c.car_id " +
+                "JOIN malfunctions m ON r.malfunction_id = m.malfunction_id " +
+                (dateFilter.isEmpty() ? "" : "WHERE r.start_date >= ?::date ") +
+                "ORDER BY " + orderBy + " DESC";
+
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            if (!dateFilter.isEmpty()) {
+                ps.setString(1, dateFilter);
+            }
+
+            ResultSet rs = ps.executeQuery();
+
+            System.out.printf("\n%-8s %-18s %-15s %-25s %-12s %-12s %-8s%n",
+                    "ID", "Владелец", "Модель", "Неисправность", "Дата", "Сумма (руб)", "Деталей");
+            System.out.println("=".repeat(110));
+
+            double totalSum = 0;
+            int repairCount = 0;
+            while (rs.next()) {
+                System.out.printf("%-8d %-18s %-15s %-25s %-12s %-12.2f %-8d%n",
+                        rs.getInt("repair_id"),
+                        truncate(rs.getString("owner_name"), 18),
+                        truncate(rs.getString("model"), 15),
+                        truncate(rs.getString("malfunction"), 25),
+                        rs.getDate("start_date"),
+                        rs.getDouble("total_cost"),
+                        rs.getInt("parts_count"));
+                totalSum += rs.getDouble("total_cost");
+                repairCount++;
+            }
+            System.out.println("=".repeat(110));
+            System.out.printf("ИТОГО: %,.2f руб. (ремонтов: %d)%n", totalSum, repairCount);
+        }
+    }
+
+    static void reportBrigadePerformance() throws SQLException {
+        System.out.println("\n--- ОТЧЁТ: ПРОИЗВОДИТЕЛЬНОСТЬ БРИГАД ---");
+
+        String sql = "SELECT " +
+                "b.name AS brigade_name, " +
+                "COUNT(r.repair_id) AS total_repairs, " +
+                "SUM(CASE WHEN r.status = 'Завершен' THEN 1 ELSE 0 END) AS completed, " +
+                "ROUND(AVG(r.total_cost), 2) AS avg_cost, " +
+                "SUM(r.total_cost) AS total_earned " +
+                "FROM brigades b " +
+                "LEFT JOIN repairs r ON b.brigade_id = r.brigade_id " +
+                "GROUP BY b.brigade_id, b.name " +
+                "ORDER BY total_earned DESC";
+
+        try (Connection conn = DatabaseConnection.getConnection();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+
+            System.out.printf("\n%-20s %-10s %-10s %-15s %-15s%n",
+                    "Бригада", "Всего", "Завершено", "Средний чек", "Заработано (руб)");
+            System.out.println("=".repeat(80));
+
+            while (rs.next()) {
+                String brigadeName = rs.getString("brigade_name");
+                if (brigadeName == null) brigadeName = "Не назначена";
+
+                System.out.printf("%-20s %-10d %-10d %-15.2f %-15.2f%n",
+                        truncate(brigadeName, 20),
+                        rs.getInt("total_repairs"),
+                        rs.getInt("completed"),
+                        rs.getDouble("avg_cost"),
+                        rs.getDouble("total_earned"));
+            }
+        }
+    }
+
+    static void viewMenu() {
+        System.out.println("\n--- ПРЕДСТАВЛЕНИЯ (VIEW) ---");
+        System.out.println("1. Список механиков");
+        System.out.println("2. Загруженность бригад");
+        System.out.println("3. Полная информация о ремонтах");
+        System.out.print("Выберите: ");
+
+        int choice = scanner.nextInt();
+        scanner.nextLine();
+
+        String viewName = switch (choice) {
+            case 1 -> "view_mechanics_list";
+            case 2 -> "view_brigade_load";
+            case 3 -> "view_repair_full_info";
+            default -> null;
+        };
+
+        if (viewName != null) {
+            try {
+                showAllRecords(viewName);
+            } catch (SQLException e) {
+                System.out.println("Ошибка: " + e.getMessage());
+                if (e.getMessage().contains("does not exist")) {
+                    System.out.println("Представление не найдено. Убедитесь, что оно создано в БД.");
+                }
+            }
+        } else {
+            System.out.println("Неверный выбор!");
+        }
+    }
+
+    private static String truncate(String str, int maxLength) {
+        if (str == null) return "NULL";
+        if (str.length() <= maxLength) return str;
+        return str.substring(0, maxLength - 3) + "...";
+    }
+}
+
+
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+
+public class DatabaseConnection {
+    private static final String URL = "jdbc:postgresql://localhost:5432/postgres";
+    private static final String USER = "student";
+    private static final String PASSWORD = "student";
+
+    public static Connection getConnection() throws SQLException {
+        return DriverManager.getConnection(URL, USER, PASSWORD);
+    }
+}
